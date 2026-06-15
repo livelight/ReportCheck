@@ -1,0 +1,11 @@
+# 文档修订MCP节点依赖
+python-docx>=0.8.11
+flask>=2.0.0
+lxml>=4.9.0
+
+# MCP SSE支持
+fastmcp>=0.4.0
+uvicorn>=0.23.0
+starlette>=0.27.0
+sse-starlette>=1.6.0
+fastapi>=0.104.0
