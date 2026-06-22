@@ -1,0 +1,46 @@
+[
+  {
+    "id": "hard_001",
+    "rule_id": "FORMAT_TITLE_001",
+    "rule_name": "标题格式不规范",
+    "type": "format",
+    "severity": "High",
+    "section": "一、项目概述",
+    "original_text": "项目概述",
+    "suggestion": "一、项目概述",
+    "reason": "一级标题缺少章节编号"
+  },
+  {
+    "id": "soft_001",
+    "rule_id": "LANGUAGE_TYPO_001",
+    "rule_name": "存在错别字",
+    "type": "language",
+    "severity": "Medium",
+    "section": "事件描述",
+    "original_text": "系统奔溃导致服务中断",
+    "suggestion": "系统崩溃导致服务中断",
+    "reason": "'奔溃'为错别字，正确写法应为'崩溃'"
+  },
+  {
+    "id": "soft_002",
+    "rule_id": "CONTENT_ROOT_CAUSE_001",
+    "rule_name": "根因分析深度不足",
+    "type": "content",
+    "severity": "High",
+    "section": "根因分析",
+    "original_text": "经分析，发现是数据库连接池耗尽导致系统无法响应请求。",
+    "suggestion": "经5Why分析，根本原因如下：\n1. 为什么系统无法响应？→ 数据库连接池耗尽\n2. 为什么连接池耗尽？→ 并发量突增且缺乏限流机制\n3. 为什么缺乏限流？→ 容量规划不足\n根本原因：容量规划缺失和限流策略不完善",
+    "reason": "当前分析停留在表面现象，未进行深度根因分析"
+  },
+  {
+    "id": "soft_003",
+    "rule_id": "CONTENT_MEASURE_TARGET_001",
+    "rule_name": "改进措施不具体",
+    "type": "content",
+    "severity": "Medium",
+    "section": "改进措施",
+    "original_text": "1、调大数据库连接池；",
+    "suggestion": "1、调大数据库连接池；\n   - 当前配置：最大连接数50\n   - 调整后配置：最大连接数100\n   - 调整依据：基于峰值并发量分析的2倍余量\n   - 责任人：DBA团队\n   - 完成时间：2024年2月15日前",
+    "reason": "措施过于笼统，缺乏具体数值、依据和责任分工"
+  }
+]
