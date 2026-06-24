@@ -2,12 +2,13 @@
 
 ## 项目简介
 
-本项目基于 MCP (Model Context Protocol) 协议和 FastMCP 框架，提供两个独立的工作流服务：
+本项目基于 MCP (Model Context Protocol) 协议和 FastMCP 框架，提供三个独立的工作流服务：
 
 | 工作流 | 说明 | 核心文件 |
 |--------|------|----------|
 | **文档修订工作流** | 读取文档 → 获取系统信息 → 规则检查 → 合并建议 → 自动修订 → 复核 | `unified_mcp_server.py` |
 | **时间轴图工作流** | 读取处置过程 → LLM分析 → 生成专业时间轴PNG图 | `timeline_mcp_server.py` |
+| **事件复盘分析工作流** | 读取事件情况表 → LLM分析复盘 → 生成复盘报告Word文档 | `incident_mcp_server.py` |
 
 ---
 
@@ -408,7 +409,7 @@
 **第4步 - 生成时间轴图**：
 ```yaml
 节点类型: MCP
-服务: timeline_mcp_server   # 端口8002（http://40.129.21.85:8002）
+服务: unified_mcp_server   # 单端口模式下使用同一个服务地址
 工具: generate_timeline
 输入:
   data_json: {{ step2.output }}
@@ -416,13 +417,286 @@
   output_path: {{ output_path }}
 ```
 
+
+---
+
+# 工作流三：事件复盘分析工作流
+
+## 业务场景
+
+在Dify工作流中，根据生产事件情况表自动进行复盘分析，生成结构化的复盘报告文档：
+
+1. **读取事件数据** - 从Excel生产事件情况表中读取事件记录
+2. **LLM复盘分析** - 由大模型分析事件数据，包括总结、原因分析、问题暴露、改进建议、应急处置评估
+3. **生成报告** - 将LLM分析结果输出为排版精美的Word复盘报告
+
+## 工作流架构（3步工作流）
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ 1. MCP节点  │────▶│ 2. LLM节点  │────▶│ 3. MCP节点  │
+│ (读取事件表) │     │ (复盘分析)   │     │ (生成报告)   │
+└─────────────┘     └─────────────┘     └─────────────┘
+```
+
+### 各节点功能
+
+| 节点 | 功能 | 说明 |
+|------|------|------|
+| 1. MCP节点(读取事件表) | 读取Excel事件情况表，输出结构化JSON | 支持模糊表头匹配，自动统计等级分布、影响系统等 |
+| 2. LLM节点(复盘分析) | 根据事件数据进行深度复盘分析 | 按`get_incident_report_template`模板输出JSON |
+| 3. MCP节点(生成报告) | 将LLM分析结果输出为Word文档 | 包含6大章节，自动排版，支持自定义输出路径 |
+
+## 核心能力
+
+| 功能 | 说明 |
+|------|------|
+| **事件表读取** | 支持.xlsx/.xls格式，14列标准字段，表头模糊匹配 |
+| **多字段支持** | 事件编号、名称、时间、等级、影响系统、事件描述、处置方式、根因、监控告警、应急预案等 |
+| **自动汇总统计** | 按等级分布、影响系统统计、总影响时长自动计算 |
+| **结构化输出** | LLM分析输出严格遵循JSON模板，确保下游MCP节点正确解析 |
+| **报告自动生成** | 生成包含事件总结、原因分析、问题暴露、改进建议、处置评估6大章节的Word报告 |
+| **改进建议优先级** | 支持高/中/低三级，自动颜色标记（红/橙/绿） |
+| **处置时间线** | 支持在报告中嵌入时间线，展示完整处置过程 |
+
+## 输入数据格式
+
+### 第1步输出（读取事件表）
+
+```json
+{
+  "success": true,
+  "file_path": "事件情况.xlsx",
+  "total_events": 5,
+  "summary": {
+    "total_events": 5,
+    "severity_distribution": {
+      "P0重大": 1,
+      "P1严重": 2,
+      "P2一般": 2
+    },
+    "affected_systems": {
+      "CRM系统": 1,
+      "ERP系统": 1
+    },
+    "total_impact_minutes": 845
+  },
+  "events": [
+    {
+      "incident_id": "INC-2024-001",
+      "incident_name": "核心数据库连接池耗尽导致服务不可用",
+      "start_time": "2024-01-15 09:30",
+      "end_time": "2024-01-15 11:15",
+      "impact_duration_minutes": "105",
+      "severity": "P0重大",
+      "affected_systems": "CRM系统,ERP系统",
+      "impact_scope": "全部客户无法登录及操作",
+      "description": "因数据库连接数突增...",
+      "emergency_response": "1.紧急重启数据库连接池；2.临时扩容...",
+      "response_duration_minutes": "45",
+      "root_cause": "某业务模块因代码缺陷...",
+      "monitoring_alert_status": "未配置连接池使用率告警阈值...",
+      "emergency_plan": "已制定数据库连接池扩容预案..."
+    }
+  ]
+}
+```
+
+### 第2步LLM节点输出模板
+
+参考 `get_incident_report_template` 工具，输出以下JSON结构：
+
+```json
+{
+  "summary": {
+    "overview": "一句话事件概述",
+    "impact_duration": "影响时长描述",
+    "severity": "事件等级",
+    "involved_systems": "涉及系统列表",
+    "impact_scope": "影响范围详细描述"
+  },
+  "cause_analysis": {
+    "direct_cause": "直接原因",
+    "indirect_cause": "间接原因",
+    "root_cause": "根本原因分析"
+  },
+  "issues": {
+    "monitoring_alerts": "监控告警方面的问题",
+    "architecture_design": "系统架构设计方面的问题",
+    "emergency_response": "应急处置和应急预案方面的问题",
+    "others": "其他问题"
+  },
+  "suggestions": [
+    {
+      "category": "建议类别",
+      "content": "具体改进建议",
+      "priority": "高/中/低"
+    }
+  ],
+  "response_info": {
+    "response_method": "应急处置方式",
+    "response_duration": "处置时长",
+    "effectiveness": "处置效果评估",
+    "timeline": [
+      {"time": "时间点", "action": "处置动作"}
+    ]
+  }
+}
+```
+
+### 第3步输出（生成报告）
+
+```json
+{
+  "success": true,
+  "output_path": "reports/事件复盘报告_20240624_183000.docx",
+  "file_name": "事件复盘报告_20240624_183000.docx",
+  "file_size": 38247,
+  "report_sections": [
+    "事件总体总结",
+    "深入原因分析",
+    "暴露出来的问题",
+    "改进建议",
+    "应急处置方式与处置时长"
+  ]
+}
+```
+
+## Dify配置示例
+
+**第1步 - 读取事件情况表**：
+```yaml
+节点类型: MCP
+服务: unified_mcp_server
+工具: read_incident_events
+输入:
+  file_path: {{ start.file_path }}    # 事件情况Excel文件路径
+输出变量:
+  events_data: {{ events_data }}      # 事件结构化数据，传递给第2步LLM节点
+```
+
+**第2步 - LLM复盘分析**：
+```yaml
+节点类型: LLM
+提示词: |
+  你是一个资深的生产事件复盘分析专家。根据以下事件数据，进行深入复盘分析。
+  请严格按照 get_incident_report_template 工具返回的JSON模板格式输出。
+  特别注意：
+  - summary.overview 要简明扼要
+  - cause_analysis 要深入分析技术和管理层面的根因
+  - issues 要分四个方面系统梳理暴露的问题
+  - suggestions 要给出可操作的具体改进建议，标注优先级(高/中/低)
+  - response_info 要客观评估处置时效和效果
+
+输入变量:
+  events_data: {{ step1.events_data }}
+输出变量:
+  analysis_result: {{ analysis_result }}  # 结构化分析结果JSON
+```
+
+**第3步 - 生成复盘报告**：
+```yaml
+节点类型: MCP
+服务: unified_mcp_server
+工具: generate_incident_report
+输入:
+  analysis_result: {{ step2.analysis_result }}
+  incident_file_name: {{ start.file_name }}   # 原始文件名（可选）
+输出变量:
+  report_path: {{ report_path }}             # 生成的Word报告路径
+```
+
+## 测试数据
+
+提供 `事件情况_示例数据.xlsx` 作为测试数据，包含5条典型生产事件：
+
+| 事件 | 等级 | 影响系统 | 处置时长 |
+|------|------|----------|----------|
+| 核心数据库连接池耗尽 | P0重大 | CRM,ERP | 45分钟 |
+| 支付网关响应超时 | P1严重 | 支付系统 | 50分钟 |
+| 文件存储磁盘写满 | P1严重 | OA系统 | 60分钟 |
+| Session风暴登录异常 | P2一般 | IAM | 40分钟 |
+| 数据中台任务延迟 | P2一般 | 数据中台 | 180分钟 |
+
+测试方法：
+```python
+# 手动测试
+python -c "
+from incident_mcp_server import IncidentEventReader
+import json
+result = IncidentEventReader.read_events('事件情况_示例数据.xlsx')
+print(json.dumps(result, ensure_ascii=False, indent=2))
+"
+
+# 测试报告生成
+python -c "
+from incident_mcp_server import IncidentReportGenerator
+import json
+analysis = {'summary': {'overview': '测试'}, ...}  # 构造分析数据
+result = IncidentReportGenerator.generate_report(
+    analysis_result=json.dumps(analysis),
+    incident_file_name='事件情况_示例数据.xlsx'
+)
+print(result['output_path'])
+"
+```
+
 ---
 
 # 通用部分
-
 ## MCP服务架构说明
 
-本项目包含多个独立的MCP服务，它们之间的关系如下：
+本项目支持两种启动模式，可根据需要选择：
+
+### 模式一：单端口聚合模式（推荐）
+
+所有工具在同一个 FastMCP 实例中注册，通过一个端口对外提供服务。
+
+```
+                               mcp_instance.py
+                         全局唯一 FastMCP 实例
+                              "UnifiedDocumentServer"
+                    ┌──────────────────────────────────┐
+                    │  导入并注册 @mcp.tool()           │
+                    └──────────────────────────────────┘
+                               ▲        ▲         ▲
+                导入共享实例    │        │         │ 导入共享实例
+                    ┌──────────┘        └────┬─────┘
+                    ▼                        ▼
+      unified_mcp_server.py        incident_mcp_server.py
+      ┌─────────────────────┐      ┌─────────────────────────┐
+      │ 文档修订工作流工具   │      │ 事件复盘分析工作流工具   │
+      │  - read_document    │      │  - read_incident_events │
+      │  - get_document_info│      │  - generate_incident_rep│
+      │  - read_system_info │      │  - get_incident_report_ │
+      │  - match_system...  │      └─────────────────────────┘
+      │  - revise_document  │
+      │  - validate_suggest │
+      └─────────────────────┘
+                    │                          ▲
+                    ▼                          │
+         timeline_mcp_server.py ───────────────┘
+      ┌─────────────────────────┐  (同样导入共享实例)
+      │ 时间轴图工作流工具       │
+      │  - read_timeline_document│
+      │  - generate_timeline     │
+      │  - validate_timeline_data│
+      │  - get_timeline_template │
+      └─────────────────────────┘
+                    │
+                    ▼
+                 main.py (统一启动入口，默认端口18080)
+                 通过 import 触发工具注册，单进程运行
+```
+
+**核心原理**：`mcp_instance.py` 创建全局唯一的 `FastMCP` 实例。所有工具模块（`unified_mcp_server.py`、`timeline_mcp_server.py`、`incident_mcp_server.py`）都导入此实例，通过 `@mcp.tool()` 注册各自的工具。`main.py` 导入所有模块（触发注册），然后调用 `mcp.run()` 启动服务。所有工具在**同一个进程、同一个端口**下可用。
+
+Dify 中只需配置一个 MCP 服务地址：
+- `http://40.129.21.85:18080` → 所有工具（文档修订 + 时间轴图 + 事件复盘）
+
+### 模式二：独立双端口模式（向后兼容）
+
+保留原始的多进程、多端口方案，用于需要独立部署的场景。
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -437,7 +711,7 @@
 │  ┌─────────────────────┐  ┌──────────────────────────────┐      │
 │  │  @mcp.tool() 工具   │  │  @mcp.tool() 工具            │      │
 │  │  - revise_document  │  │  - validate_suggestions      │      │
-│  │  - get_tools_info   │  │                              │      │
+│  │  - get_document_... │  │                              │      │
 │  └─────────────────────┘  └──────────────────────────────┘      │
 └─────────────────────────────────────────────────────────────────┘
                           │ 启动时自动拉起子进程
@@ -448,7 +722,7 @@
 │                     默认端口: 8002 (SSE模式)                     │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │  @mcp.tool() 工具                                      │    │
-│  │  - read_document    ← 代理到 unified_mcp_server        │    │
+│  │  - read_timeline_document                              │    │
 │  │  - generate_timeline                                    │    │
 │  │  - validate_timeline_data                               │    │
 │  │  - get_timeline_template                                │    │
@@ -456,27 +730,11 @@
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 多服务不冲突的原因
+**核心原理**：两个服务运行在**不同的操作系统进程**中，各自拥有独立的 `FastMCP` 实例和内存空间。`unified_mcp_server.py` 启动时会自动以子进程拉起 `timeline_mcp_server.py`（端口8002）。
 
-两个源文件中都有 `read_document` 函数且都带有 `@mcp.tool()` 装饰器，但**不会冲突**，原因如下：
-
-| 比较项 | unified_mcp_server.py | timeline_mcp_server.py |
-|--------|----------------------|----------------------|
-| **MCP实例** | `FastMCP("UnifiedDocumentServer")` | `FastMCP("TimelineDocumentServer")` |
-| **进程** | 主进程（独立内存空间） | 子进程（独立内存空间） |
-| **默认端口** | 18080 | 8002 |
-| **`read_document`** | 独立的完整实现 | 代理调用 unifed 中的 `DocumentReader` |
-
-**核心原理**：两个服务运行在**不同的操作系统进程**中，各自拥有独立的 `mcp` 对象和内存空间。`@mcp.tool()` 注册的工具只属于各自的 `FastMCP` 实例，互不干扰。就像两台电脑上各有一个同名的程序，名字相同但运行环境完全隔离。
-
-在 Dify 中配置 MCP 工具时，通过**服务地址+端口**区分：
+Dify 中需要配置两个 MCP 服务地址：
 - `http://40.129.21.85:18080` → 文档修订工作流（unified_mcp_server）
 - `http://40.129.21.85:8002` → 时间轴图工作流（timeline_mcp_server）
-
-### 服务启动关系
-
-- **SSE模式**：启动 `unified_mcp_server.py` 会自动以子进程拉起 `timeline_mcp_server.py`（40.129.21.85:8002），两者同时运行
-- **stdio模式**：`unified_mcp_server.py` 不会自动启动 timeline 服务，需手动启动
 
 ## 安装依赖
 
@@ -546,14 +804,18 @@ print(f"时间轴图: {result['output_path']} ({result.get('file_size_readable')
 
 ### 3. 启动服务
 
-```bash
-# 统一MCP服务器（文档修订工作流 + 自动联动时间轴服务）
-python unified_mcp_server.py                                       # SSE模式（默认，端口18080）
-python unified_mcp_server.py --transport stdio                     # stdio模式
+支持两种模式：
 
-# 独立时间轴MCP服务器
-python timeline_mcp_server.py                                      # SSE模式（默认，端口8002）
-python timeline_mcp_server.py --transport stdio                    # stdio模式
+```bash
+# 模式一（推荐）：单端口聚合模式 - 所有工具通过一个端口提供
+python main.py                                                  # SSE模式（默认，端口18080）
+python main.py --transport stdio                                # stdio模式
+python main.py --port 18080                                     # 自定义端口
+
+# 模式二（向后兼容）：独立部署模式
+python unified_mcp_server.py                                    # 文档修订服务（端口18080）
+python timeline_mcp_server.py                                   # 时间轴图服务（端口8002）
+python incident_mcp_server.py                                   # 事件复盘分析服务（端口8003）
 ```
 
 ### 4. 运行测试
@@ -567,8 +829,11 @@ python test_all.py
 
 | 文件 | 说明 |
 |------|------|
-| `unified_mcp_server.py` | **统一MCP服务器** - 文档读取+系统信息读取+文档修订，联动启动时间轴服务 |
-| `timeline_mcp_server.py` | **时间轴图MCP服务器** - 根据事件数据生成PNG时间轴图 |
+| `unified_mcp_server.py` | **统一MCP服务器** - 文档读取+系统信息读取+文档修订（导入共享MCP实例） |
+| `timeline_mcp_server.py` | **时间轴图MCP节点** - 根据事件数据生成PNG时间轴图（导入共享MCP实例） |
+| `incident_mcp_server.py` | **事件复盘分析MCP节点** - 读取事件情况表+生成复盘报告（导入共享MCP实例） |
+| `mcp_instance.py` | **全局唯一FastMCP实例** - 单端口模式下所有工具的共享MCP实例 |
+| `main.py` | **统一启动入口** - 单端口聚合模式，导入所有工具模块并启动服务 |
 | `document_reader_mcp.py` | 独立文档读取MCP节点（支持智能分段） |
 | `revision_mcp_node.py` | 旧版文档修订MCP节点（已不推荐） |
 | `prompt_step1_5_analyze_systems.md` | 第1.5步文档系统关联分析提示词 |
@@ -577,6 +842,7 @@ python test_all.py
 | `prompt_step4_merge_prioritize.md` | 第4步合并去重排序提示词 |
 | `prompt_step5_user_confirmation.md` | 第5步用户确认提示词 |
 | `测试数据_系统模块信息.xlsx` | 系统信息Excel样例，包含6个系统/20条记录的测试数据 |
+| `事件情况_示例数据.xlsx` | 生产事件情况Excel样例，包含5条典型事件的测试数据 |
 | `tests/` | 测试文件夹 |
 
 ## 代码结构
@@ -602,17 +868,17 @@ unified_mcp_server.py
 │   ├── _add_red_comment_to_paragraph()
 │   ├── _write_revision_log()
 │   └── _get_revision_log_path()
-├── SystemInfoReader          # 系统信息读取器（新增）
+├── SystemInfoReader          # 系统信息读取器
 │   ├── read_system_info()   # 从Excel读取系统信息
 │   └── _map_headers()       # 表头模糊匹配
-└── MCP工具 (7个)
+└── MCP工具 (7个，通过import mcp_instance注册)
     ├── read_document()
     ├── get_document_info()
-    ├── read_system_info()           # 新增：读取Excel系统信息表
-    ├── match_system_from_document() # 新增：文档系统关键词匹配
+    ├── read_system_info()
+    ├── match_system_from_document()
     ├── revise_document()
     ├── validate_suggestions()
-    └── get_tools_info()
+    └── get_document_tools_info()
 ```
 
 ### timeline_mcp_server.py
@@ -624,13 +890,37 @@ timeline_mcp_server.py
 │   ├── generate_timeline()
 │   ├── generate_timeline_v2()
 │   └── get_timeline_data_template()
-└── MCP工具 (5个)
-    ├── read_document()
+└── MCP工具 (5个，通过import mcp_instance注册)
+    ├── read_timeline_document()
     ├── generate_timeline()
     ├── validate_timeline_data()
     ├── get_timeline_template()
-    └── get_tools_info()
+    └── get_timeline_tools_info()
 ```
+
+### mcp_instance.py
+
+```
+mcp_instance.py
+└── mcp = FastMCP("UnifiedDocumentServer")   # 全局唯一的FastMCP实例
+```
+
+### incident_mcp_server.py
+
+```
+incident_mcp_server.py
+├── IncidentEventReader        # 事件情况表读取器
+│   ├── read_events()          # 从Excel读取事件数据
+│   └── _map_headers()         # 表头模糊匹配
+├── IncidentReportGenerator    # 复盘报告生成器
+│   ├── generate_report()      # 生成Word复盘报告
+│   ├── _add_section_heading()
+│   ├── _add_subsection_text()
+│   └── _add_field_row()
+└── MCP工具 (3个，通过import mcp_instance注册)
+    ├── read_incident_events()
+    ├── generate_incident_report()
+    └── get_incident_report_template()
 
 ## LLM节点 Temperature 设置
 
@@ -642,7 +932,7 @@ timeline_mcp_server.py
 | **文档修订** 第4步 合并去重 | 结果整合 | 0.3-0.5 | 判断整合 |
 | **文档修订** 第7步 复核 | 质量评估 | 0.3-0.5 | 综合判断 |
 | **时间轴** 第2步 分析处置过程 | 事件提取 | 0.2-0.3 | 精确提取 |
-| **时间轴** 第3步 校验 | 时间顺序检查 | 0.1-0.2 | 严格校验 |
+| **事件复盘** 第2步 复盘分析 | 事件总结与建议 | 0.2-0.4 | 综合分析判断 |
 
 ## 注意事项
 

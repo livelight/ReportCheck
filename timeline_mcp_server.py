@@ -1,55 +1,17 @@
 """
-时间轴图MCP服务器 - 根据事件处置过程生成专业时间轴图
+时间轴图MCP节点 - 根据事件处置过程生成专业时间轴图
 
-工作流位置：第4步 - MCP节点
+工作流位置：第4步 - MCP节点（共享MCP实例模式）
 功能：根据LLM分析并格式化后的处置过程描述，生成PNG格式的时间轴图
 
 依赖安装：
     pip install matplotlib pillow fastmcp
 
-输入格式（由第2步LLM节点输出的JSON）：
-    {
-        "title": "事件处置时间轴",
-        "incident_id": "INC-2024-001",
-        "start_time": "2024-01-15 14:00",
-        "end_time": "2024-01-15 16:30",
-        "events": [
-            {
-                "time": "14:00",
-                "description": "监控告警触发",
-                "handler": "监控系统",
-                "system": "Zabbix",
-                "node_type": "start",
-                "category": "automation"
-            },
-            {
-                "time": "14:05",
-                "description": "值班人员确认告警",
-                "handler": "张三",
-                "system": "值班系统",
-                "node_type": "normal",
-                "category": "manual"
-            },
-            {
-                "time": "14:30",
-                "description": "应急响应启动",
-                "handler": "李四",
-                "system": "应急指挥平台",
-                "node_type": "special",
-                "category": "decision"
-            },
-            ...
-        ]
-    }
+运行方式（共享MCP实例模式）：
+    python main.py                                       # 与unified_mcp_server共享一个端口
 
-节点类型说明：
-- start: 开始节点（绿色圆形）
-- end: 结束节点（红色圆形）
-- normal: 普通中间节点（蓝色圆形）
-- special: 特殊中间节点（橙色菱形，表示关键决策/异常）
-
-运行方式：
-    python timeline_mcp_server.py                               # stdio模式
+运行方式（独立模式-向后兼容）：
+    python timeline_mcp_server.py                        # stdio模式
     python timeline_mcp_server.py --transport sse --port 8002   # SSE模式
 """
 
@@ -71,13 +33,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger('TimelineMCPServer')
 
-# FastMCP导入
+# FastMCP导入 - 优先使用共享MCP实例（单端口模式），fallback到独立实例
 try:
-    from fastmcp import FastMCP
+    from mcp_instance import mcp
     FASTMCP_AVAILABLE = True
+    MCP_SHARED_MODE = True  # 共享模式标志
 except ImportError:
-    FASTMCP_AVAILABLE = False
-    logger.warning("fastmcp未安装，请运行: pip install fastmcp")
+    try:
+        from fastmcp import FastMCP
+        FASTMCP_AVAILABLE = True
+        MCP_SHARED_MODE = False  # 独立模式
+    except ImportError:
+        FASTMCP_AVAILABLE = False
+        MCP_SHARED_MODE = False
+        logger.warning("fastmcp未安装，请运行: pip install fastmcp")
 
 # 图表绘制库
 try:
@@ -932,13 +901,14 @@ class TimelineChartGenerator:
 # ============================================================
 
 if FASTMCP_AVAILABLE:
-    mcp = FastMCP("TimelineDocumentServer")
+    # 如果不是共享模式，创建独立的 FastMCP 实例
+    if not MCP_SHARED_MODE:
+        mcp = FastMCP("TimelineDocumentServer")
 
     @mcp.tool()
-    def read_document(file_path: str) -> str:
+    def read_timeline_document(file_path: str) -> str:
         """
-        读取文档内容，返回文档文本和元数据（第1步）
-        复用unified_mcp_server中的DocumentReader逻辑
+        读取文档内容，返回文档文本和元数据（时间轴工作流第1步）
         
         Args:
             file_path: 文档路径，支持 .docx、.wps、.wpsx 格式
@@ -1120,16 +1090,16 @@ if FASTMCP_AVAILABLE:
         return TimelineChartGenerator.get_timeline_data_template()
 
     @mcp.tool()
-    def get_tools_info() -> str:
-        """获取所有工具信息"""
+    def get_timeline_tools_info() -> str:
+        """获取时间轴图工具信息"""
         tools_info = {
             "name": "TimelineDocumentServer",
             "version": "1.0.0",
             "description": "时间轴图MCP服务器，支持文档读取和时间轴图生成",
             "tools": [
                 {
-                    "name": "read_document",
-                    "description": "读取文档内容（第1步）",
+                    "name": "read_timeline_document",
+                    "description": "读取文档内容（时间轴工作流第1步）",
                     "category": "文档读取"
                 },
                 {
@@ -1202,13 +1172,16 @@ def main():
         print(f"消息端点: http://{args.host}:{args.port}/messages")
 
     print("\n可用工具:")
-    print("  【第1步 - 文档读取】")
-    print("    1. read_document           - 读取文档内容")
-    print("  【第4步 - 时间轴图生成】")
-    print("    2. generate_timeline       - 根据事件数据生成时间轴PNG图")
-    print("    3. validate_timeline_data  - 验证时间轴数据格式")
-    print("    4. get_timeline_template   - 获取时间轴数据模板")
-    print("    5. get_tools_info          - 工具信息")
+    print("  【时间轴图生成】")
+    tool_list = [
+        ("read_timeline_document", "读取文档内容（时间轴工作流，仅独立模式可用）"),
+        ("generate_timeline", "根据事件数据生成时间轴PNG图"),
+        ("validate_timeline_data", "验证时间轴数据格式"),
+        ("get_timeline_template", "获取时间轴数据模板"),
+        ("get_tools_info", "工具信息"),
+    ]
+    for i, (name, desc) in enumerate(tool_list, 1):
+        print(f"    {i}. {name:<35s} - {desc}")
     print("\n启动服务...")
     print("-" * 70)
 

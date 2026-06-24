@@ -41,13 +41,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger('UnifiedMCPServer')
 
-# FastMCP导入
+# FastMCP导入 - 使用全局唯一的MCP实例
 try:
-    from fastmcp import FastMCP
+    from mcp_instance import mcp
     FASTMCP_AVAILABLE = True
 except ImportError:
     FASTMCP_AVAILABLE = False
-    logger.warning("fastmcp未安装，请运行: pip install fastmcp")
+    logger.warning("mcp_instance模块未找到，请确保mcp_instance.py存在")
 
 # 文档处理库
 try:
@@ -1156,11 +1156,10 @@ class DocumentReviser:
 
 
 # ============================================================
-# MCP服务器初始化
+# MCP服务器初始化 - 导入共享mcp实例，注册工具
 # ============================================================
 
 if FASTMCP_AVAILABLE:
-    mcp = FastMCP("UnifiedDocumentServer")
 
     # ============================================================
     # 第1步 - 文档读取工具
@@ -1600,8 +1599,8 @@ if FASTMCP_AVAILABLE:
             }, ensure_ascii=False)
 
     @mcp.tool()
-    def get_tools_info() -> str:
-        """获取所有工具信息"""
+    def get_document_tools_info() -> str:
+        """获取文档修订工具信息"""
         tools_info = {
             "name": "UnifiedDocumentServer",
             "version": "1.2.0",
@@ -1706,12 +1705,14 @@ def main():
     print("  【第6步 - 文档修订】")
     print("    5. revise_document        - 根据建议修订文档")
     print("    6. validate_suggestions   - 验证建议JSON")
-    print("    7. get_tools_info         - 工具信息")
+    print("  【时间轴图服务（同一端口）】")
+    print("    7. generate_timeline       - 根据事件数据生成时间轴PNG图")
+    print("    8. validate_timeline_data  - 验证时间轴数据格式")
+    print("    9. get_timeline_template   - 获取时间轴数据模板")
     print("\n启动服务...")
     print("-" * 70)
 
-    # 同时启动时间轴MCP服务（SSE模式，端口8002）
-    _start_timeline_server(args.transport)
+    # 不再需要子进程启动timeline服务，所有工具已在同一个共享mcp实例中注册
 
     # 启动FastMCP服务
     if args.transport == 'sse':
@@ -1722,34 +1723,35 @@ def main():
 
 def _start_timeline_server(transport: str):
     """
-    启动时间轴图MCP服务
+    启动时间轴图MCP服务（旧方案，不再使用）
     
-    如果timeline_mcp_server.py存在，则启动它。
-    SSE模式下作为独立服务运行在端口8002；
-    stdio模式下作为子进程运行。
+    新方案通过 main.py 统一启动，所有工具在同一个共享 mcp 实例中注册。
+    此函数保留仅用于向后兼容（直接运行 unified_mcp_server.py 时仍然独立启动timeline）。
     """
-    timeline_file = Path(__file__).parent / "timeline_mcp_server.py"
-    if not timeline_file.exists():
-        logger.info("timeline_mcp_server.py不存在，跳过启动")
-        return
-    
-    try:
-        import subprocess
-        if transport == 'sse':
-            cmd = [sys.executable, str(timeline_file), '--transport', 'sse', '--host', '40.129.21.85', '--port', '8002']
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-            )
-            logger.info(f"时间轴MCP服务已启动: http://40.129.21.85:8002 (PID: {process.pid})")
-            print(f"\n  【时间轴图服务 - http://40.129.21.85:8002】")
-            print(f"    6. generate_timeline       - 根据事件数据生成时间轴PNG图")
-            print(f"    7. validate_timeline_data  - 验证时间轴数据格式")
-            print(f"    8. get_timeline_template   - 获取时间轴数据模板")
-    except Exception as e:
-        logger.warning(f"启动时间轴MCP服务失败: {e}")
+    # 当作为独立服务运行时，仍然需要启动timeline的子进程
+    if not hasattr(mcp, '_SHARED_MODE') or not mcp._SHARED_MODE:
+        timeline_file = Path(__file__).parent / "timeline_mcp_server.py"
+        if not timeline_file.exists():
+            logger.info("timeline_mcp_server.py不存在，跳过启动")
+            return
+        
+        try:
+            import subprocess
+            if transport == 'sse':
+                cmd = [sys.executable, str(timeline_file), '--transport', 'sse', '--host', '40.129.21.85', '--port', '8002']
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+                )
+                logger.info(f"时间轴MCP服务已启动: http://40.129.21.85:8002 (PID: {process.pid})")
+                print(f"\n  【时间轴图服务 - http://40.129.21.85:8002】")
+                print(f"    6. generate_timeline       - 根据事件数据生成时间轴PNG图")
+                print(f"    7. validate_timeline_data  - 验证时间轴数据格式")
+                print(f"    8. get_timeline_template   - 获取时间轴数据模板")
+        except Exception as e:
+            logger.warning(f"启动时间轴MCP服务失败: {e}")
 
 
 if __name__ == "__main__":
