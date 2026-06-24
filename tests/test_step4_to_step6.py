@@ -5,12 +5,16 @@
 
 import json
 import sys
-sys.path.insert(0, 'c:\\Users\\lpy09\\ComateProjects\\comate-zulu-demo-1781339688688')
+import os
+
+# 添加项目根目录到模块搜索路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from revision_mcp_node import (
     transform_step4_to_step6,
     prepare_suggestions_for_revision,
-    CheckSuggestion
+    CheckSuggestion,
+    FASTMCP_AVAILABLE
 )
 
 

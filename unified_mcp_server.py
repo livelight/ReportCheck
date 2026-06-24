@@ -3,9 +3,11 @@
 
 功能：
 1. 第1步 - 文档读取：读取文档内容，输出JSON
-2. 第6步 - 文档修订：根据检查建议修订文档
+2. 第1.5步 - 系统信息读取：从Excel系统信息表读取系统基础信息
+3. 第6步 - 文档修订：根据检查建议修订文档
 
 支持格式：Word文档(.docx)、WPS文档(.wps和.wpsx)
+系统信息格式：Excel表格(.xlsx)
 启动方式：stdio模式 或 SSE模式
 
 使用方法:
@@ -58,6 +60,14 @@ try:
 except ImportError:
     DOCX_AVAILABLE = False
     logger.warning("python-docx未安装，请运行: pip install python-docx")
+
+# Excel处理库（用于读取系统信息表）
+try:
+    import openpyxl
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+    logger.warning("openpyxl未安装，请运行: pip install openpyxl")
 
 
 # ============================================================
@@ -328,6 +338,264 @@ class DocumentReader:
             paragraph_count=len(doc.paragraphs),
             table_count=len(doc.tables)
         )
+
+
+# ============================================================
+# 系统信息读取器（从Excel读取系统基础信息）
+# ============================================================
+
+class SystemInfoReader:
+    """系统信息读取器 - 从Excel文件读取系统基础信息（正式名称、开发部门、运维部门等）"""
+
+    # 期望的Excel列标题映射（支持模糊匹配）
+    EXPECTED_HEADER_MAP = {
+        "系统中文名称": "system_name_cn",
+        "系统英文简称": "system_name_en",
+        "模块中文名称": "module_name_cn",
+        "模块英文简称": "module_name_en",
+        "研发牵头部门": "dev_department",
+        "运维牵头部门": "ops_department"
+    }
+
+    @staticmethod
+    def read_system_info(file_path: str) -> Dict[str, Any]:
+        """
+        从Excel文件中读取系统基础信息
+
+        Args:
+            file_path: Excel文件路径（.xlsx格式）
+
+        Returns:
+            Dict包含systems（按系统分组的完整信息列表）和raw_rows（原始行数据）
+        """
+        logger.info(f"开始读取系统信息表: {file_path}")
+
+        if not file_path or not file_path.strip():
+            return {
+                "success": False,
+                "error": "file_path不能为空",
+                "error_type": "ValidationError"
+            }
+
+        file_path = file_path.strip()
+
+        if not os.path.exists(file_path):
+            return {
+                "success": False,
+                "error": f"文件不存在: {file_path}",
+                "error_type": "FileNotFoundError"
+            }
+
+        ext = Path(file_path).suffix.lower()
+        if ext not in ['.xlsx', '.xls']:
+            return {
+                "success": False,
+                "error": f"不支持的文件格式: {ext}，仅支持 .xlsx、.xls",
+                "error_type": "UnsupportedFormatError"
+            }
+
+        if not OPENPYXL_AVAILABLE:
+            return {
+                "success": False,
+                "error": "openpyxl库未安装，请运行: pip install openpyxl",
+                "error_type": "ImportError"
+            }
+
+        try:
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            ws = wb.active
+            if ws is None:
+                return {
+                    "success": False,
+                    "error": "Excel文件中没有工作表",
+                    "error_type": "EmptyWorkbookError"
+                }
+
+            # 读取所有行
+            rows = list(ws.iter_rows(values_only=True))
+            wb.close()
+
+            if not rows:
+                return {
+                    "success": False,
+                    "error": "Excel文件为空",
+                    "error_type": "EmptyFileError"
+                }
+
+            # 解析表头
+            header_row = rows[0]
+            header_mapping = SystemInfoReader._map_headers(header_row)
+
+            logger.info(f"表头映射: {header_mapping}")
+
+            if not header_mapping:
+                return {
+                    "success": False,
+                    "error": f"无法识别Excel表头，期望的列包括: {', '.join(SystemInfoReader.EXPECTED_HEADER_MAP.keys())}",
+                    "error_type": "HeaderParseError"
+                }
+
+            # 解析数据行
+            raw_rows = []
+            systems_map = {}  # key: 系统英文简称, value: 系统信息
+
+            for row_idx, row in enumerate(rows[1:], start=2):
+                if all(cell is None or (isinstance(cell, str) and cell.strip() == '') for cell in row):
+                    continue  # 跳过空行
+
+                row_dict = {}
+                for col_idx, (field_name, field_key) in header_mapping.items():
+                    value = row[col_idx] if col_idx < len(row) else None
+                    if value is not None:
+                        value = str(value).strip()
+                    row_dict[field_key] = value or ""
+
+                raw_rows.append(row_dict)
+
+                # 按系统英文简称聚合
+                sys_en = row_dict.get("system_name_en", "").strip()
+                sys_cn = row_dict.get("system_name_cn", "").strip()
+                dev_dept = row_dict.get("dev_department", "").strip()
+                ops_dept = row_dict.get("ops_department", "").strip()
+
+                if sys_en and sys_cn:
+                    if sys_en not in systems_map:
+                        systems_map[sys_en] = {
+                            "system_name_cn": sys_cn,
+                            "system_name_en": sys_en,
+                            "dev_department": dev_dept,
+                            "ops_department": ops_dept,
+                            "modules": []
+                        }
+                    # 如果存在模块信息，记录模块
+                    module_cn = row_dict.get("module_name_cn", "").strip()
+                    module_en = row_dict.get("module_name_en", "").strip()
+                    if module_cn:
+                        systems_map[sys_en]["modules"].append({
+                            "module_name_cn": module_cn,
+                            "module_name_en": module_en
+                        })
+
+            # 构建按系统分组的概要信息
+            systems_list = []
+            for sys_en, sys_info in systems_map.items():
+                systems_list.append(sys_info)
+
+            # 构建系统名称索引（便于LLM检索）
+            system_name_index = {}
+            for sys_info in systems_list:
+                # 用中文名和英文名作为key
+                system_name_index[sys_info["system_name_cn"]] = sys_info
+                system_name_index[sys_info["system_name_en"]] = sys_info
+
+            result = {
+                "success": True,
+                "file_path": file_path,
+                "total_systems": len(systems_list),
+                "total_records": len(raw_rows),
+                "systems": systems_list,
+                # 记录数超过100时省略raw_rows（避免超大JSON）
+                "raw_rows": raw_rows if len(raw_rows) <= 100 else f"省略（共{len(raw_rows)}条，请通过systems查看聚合数据）",
+                "system_name_index": {
+                    "keys": list(system_name_index.keys()),
+                    "description": "系统名称索引，可用于根据文档中出现的系统名称快速查找对应系统信息"
+                }
+            }
+
+            logger.info(f"系统信息读取完成: {len(systems_list)}个系统, {len(raw_rows)}条记录")
+            return result
+
+        except Exception as e:
+            logger.exception(f"读取系统信息表失败: {e}")
+            return {
+                "success": False,
+                "error": f"读取系统信息表失败: {str(e)}",
+                "error_type": type(e).__name__
+            }
+
+    @staticmethod
+    def _map_headers(header_row: tuple) -> Dict[int, str]:
+        """
+        将Excel表头映射到内部字段名
+
+        Args:
+            header_row: Excel的第一行（表头）
+
+        Returns:
+            Dict: {列索引: (原始表头, 内部字段名)}
+        """
+        import re
+
+        mapping = {}
+
+        # 构建模糊匹配映射：中文表头（去除非中文字符）→ 字段名
+        normalized_expected = {}
+        # 补充英文缩写的别名映射：英文名 → 字段名
+        alias_map = {
+            "系统中文名称": "system_name_cn",
+            "系统英文简称": "system_name_en",
+            "模块中文名称": "module_name_cn",
+            "模块英文简称": "module_name_en",
+            "研发牵头部门": "dev_department",
+            "运维牵头部门": "ops_department"
+        }
+        # 常见同义变体映射
+        synonym_map = {
+            "系统中文名": "系统中文名称",
+            "系统英文名": "系统英文简称",
+            "模块中文名": "模块中文名称",
+            "模块英文名": "模块英文简称",
+            "研发部门": "研发牵头部门",
+            "运维部门": "运维牵头部门",
+            "研发牵头": "研发牵头部门",
+            "运维牵头": "运维牵头部门"
+        }
+
+        for cn_name, field_key in SystemInfoReader.EXPECTED_HEADER_MAP.items():
+            cn_clean = re.sub(r'[^\u4e00-\u9fff]', '', cn_name)
+            normalized_expected[cn_clean] = field_key
+
+        for col_idx, header_value in enumerate(header_row):
+            if header_value is None:
+                continue
+            header_str = str(header_value).strip()
+            if not header_str:
+                continue
+
+            # 1. 精确匹配（原始字符串）
+            if header_str in SystemInfoReader.EXPECTED_HEADER_MAP:
+                mapping[col_idx] = (header_str, SystemInfoReader.EXPECTED_HEADER_MAP[header_str])
+                continue
+
+            # 2. 同义变体匹配
+            if header_str in synonym_map:
+                target = synonym_map[header_str]
+                if target in SystemInfoReader.EXPECTED_HEADER_MAP:
+                    mapping[col_idx] = (header_str, SystemInfoReader.EXPECTED_HEADER_MAP[target])
+                    continue
+
+            # 3. 模糊匹配（去除非中文字符后匹配）
+            header_clean = re.sub(r'[^\u4e00-\u9fff]', '', header_str)
+
+            # 跳过空字符串（纯英文/数字表头无法通过中文模糊匹配）
+            if not header_clean:
+                continue
+
+            if header_clean in normalized_expected:
+                mapping[col_idx] = (header_str, normalized_expected[header_clean])
+                continue
+
+            # 4. 部分匹配（包含关系）——要求最小匹配长度≥3个中文字符
+            #    避免"名称"误匹配"系统中文名称"、"缩写"误匹配"英文简称"等
+            for cn_clean, field_key in normalized_expected.items():
+                min_match_len = 3
+                if len(cn_clean) < min_match_len or len(header_clean) < min_match_len:
+                    continue
+                if cn_clean in header_clean or header_clean in cn_clean:
+                    mapping[col_idx] = (header_str, field_key)
+                    break
+
+        return mapping
 
 
 # ============================================================
@@ -1002,6 +1270,236 @@ if FASTMCP_AVAILABLE:
             }, ensure_ascii=False)
 
     # ============================================================
+    # 新增第1.5步 - 系统信息读取工具
+    # ============================================================
+
+    @mcp.tool()
+    def read_system_info(file_path: str) -> str:
+        """
+        从Excel系统信息表中读取系统基础信息（第1.5步 - 新增节点）
+
+        从预先维护的系统信息Excel文件中读取各系统的正式中文名称、英文简称、
+        研发牵头部门、运维牵头部门等信息，返回结构化JSON供后续LLM节点使用。
+
+        Args:
+            file_path: 系统信息Excel文件路径（.xlsx格式）
+
+        Returns:
+            JSON字符串，包含systems（按系统分组的信息列表）和raw_rows（原始行数据）
+
+        输出结构示例:
+        {
+            "success": true,
+            "total_systems": 6,
+            "total_records": 20,
+            "systems": [
+                {
+                    "system_name_cn": "客户关系管理系统",
+                    "system_name_en": "CRM",
+                    "dev_department": "产品研发部",
+                    "ops_department": "基础运维部",
+                    "modules": [...]
+                }
+            ],
+            "raw_rows": [...],
+            "system_name_index": {
+                "keys": ["客户关系管理系统", "CRM", ...]
+            }
+        }
+        """
+        start_time = datetime.now()
+        call_id = f"sysinfo_{start_time.strftime('%Y%m%d_%H%M%S')}"
+
+        logger.info(f"[{call_id}] 开始读取系统信息表: {file_path}")
+
+        try:
+            if not file_path or not file_path.strip():
+                return json.dumps({
+                    "success": False,
+                    "error": "file_path不能为空",
+                    "error_type": "ValidationError",
+                    "call_id": call_id
+                }, ensure_ascii=False)
+
+            reader = SystemInfoReader()
+            result = reader.read_system_info(file_path)
+            result['call_id'] = call_id
+            result['timestamp'] = datetime.now().isoformat()
+
+            logger.info(f"[{call_id}] 系统信息读取完成: {result.get('total_systems', 0)}个系统, {result.get('total_records', 0)}条记录")
+            # 注意：不传 indent=2 以减小大文件场景下的JSON体积
+            return json.dumps(result, ensure_ascii=False)
+
+        except Exception as e:
+            logger.exception(f"[{call_id}] 读取系统信息异常")
+            return json.dumps({
+                "success": False,
+                "error": f"读取失败: {str(e)}",
+                "error_type": type(e).__name__,
+                "call_id": call_id,
+                "timestamp": datetime.now().isoformat()
+            }, ensure_ascii=False)
+
+    @mcp.tool()
+    def match_system_from_document(document_text: str, system_info_json: str) -> str:
+        """
+        从文档内容中识别涉及的系统，并匹配系统信息表中的对应记录（第1.5步 - 辅助工具）
+
+        该工具遍历文档文本中出现的系统名称（包括中英文名称），与系统信息表中的记录进行匹配，
+        返回文档中所涉及系统的详细信息。配合LLM分析节点使用，可辅助LLM更快完成系统匹配。
+
+        Args:
+            document_text: 文档内容文本（从第1步read_document输出中获得）
+            system_info_json: 系统信息表JSON字符串（从read_system_info输出中获得）
+
+        Returns:
+            JSON字符串，包含matched_systems（匹配到的系统列表）
+        """
+        start_time = datetime.now()
+        call_id = f"matchsys_{start_time.strftime('%Y%m%d_%H%M%S')}"
+
+        logger.info(f"[{call_id}] 开始从文档中匹配系统信息")
+
+        try:
+            if not document_text or not document_text.strip():
+                return json.dumps({
+                    "success": False,
+                    "error": "document_text不能为空",
+                    "error_type": "ValidationError",
+                    "call_id": call_id
+                }, ensure_ascii=False)
+
+            if not system_info_json or not system_info_json.strip():
+                return json.dumps({
+                    "success": False,
+                    "error": "system_info_json不能为空",
+                    "error_type": "ValidationError",
+                    "call_id": call_id
+                }, ensure_ascii=False)
+
+            # 解析系统信息
+            try:
+                sys_info = json.loads(system_info_json)
+            except json.JSONDecodeError as e:
+                return json.dumps({
+                    "success": False,
+                    "error": f"system_info_json解析失败: {str(e)}",
+                    "error_type": "JSONParseError",
+                    "call_id": call_id
+                }, ensure_ascii=False)
+
+            if not sys_info.get("success"):
+                return json.dumps({
+                    "success": False,
+                    "error": f"系统信息读取失败: {sys_info.get('error', '未知错误')}",
+                    "error_type": "SystemInfoError",
+                    "call_id": call_id
+                }, ensure_ascii=False)
+
+            systems = sys_info.get("systems", [])
+
+            # ----------------------------------------------------------------
+            # 收集所有系统名称关键词（中文名、英文名），排除通用模块名
+            # ----------------------------------------------------------------
+            # 如果模块名在超过3个系统中出现，视为通用名，不作为匹配关键词
+            # 这避免"基础管理"、"数据管理"等通用模块名导致全部系统误匹配
+            #
+            # 分两轮构建：
+            #   第1轮：统计每个模块名出现的系统数
+            #   第2轮：只将"稀有模块名"（出现系统数<=阈值）作为关键词
+            MODULE_DUPLICATE_THRESHOLD = 3
+
+            # 第1轮：统计模块名频率
+            module_freq = {}
+            for sys_data in systems:
+                seen_mods = set()
+                for module in sys_data.get("modules", []):
+                    module_cn = module.get("module_name_cn", "").strip()
+                    if module_cn and module_cn not in seen_mods:
+                        seen_mods.add(module_cn)
+                        module_freq[module_cn] = module_freq.get(module_cn, 0) + 1
+
+            # 第2轮：构建关键词 → 系统映射
+            system_keywords = {}
+            for sys_data in systems:
+                cn_name = sys_data.get("system_name_cn", "")
+                en_name = sys_data.get("system_name_en", "")
+                keywords = set()
+
+                # 中文名全称（高优先级）
+                if cn_name:
+                    keywords.add(cn_name)
+                    # 生成可能的简称（如"客户关系管理系统"→"客户关系管理"）
+                    if cn_name.endswith("系统"):
+                        keywords.add(cn_name[:-2])
+                    if cn_name.endswith("平台"):
+                        keywords.add(cn_name[:-2])
+                    if cn_name.endswith("中台"):
+                        keywords.add(cn_name[:-2])
+
+                # 英文名称（高优先级）
+                if en_name:
+                    keywords.add(en_name)
+
+                # 模块名称——只使用稀有模块名（出现系统数<=阈值）
+                for module in sys_data.get("modules", []):
+                    module_cn = module.get("module_name_cn", "").strip()
+                    module_en = module.get("module_name_en", "").strip()
+                    module_freq_count = module_freq.get(module_cn, 999)
+                    if module_cn and module_freq_count <= MODULE_DUPLICATE_THRESHOLD:
+                        keywords.add(module_cn)
+                    if module_en and module_freq_count <= MODULE_DUPLICATE_THRESHOLD:
+                        keywords.add(module_en)
+
+                # 存储关键词到系统的映射
+                for kw in keywords:
+                    if kw:
+                        if kw not in system_keywords:
+                            system_keywords[kw] = []
+                        system_keywords[kw].append(sys_data)
+
+            # ----------------------------------------------------------------
+            # 在文档中搜索关键词（优先匹配完整系统名，再匹配模块名）
+            # ----------------------------------------------------------------
+            matched_systems_set = {}  # sys_key -> sys_data (去重用dict，O(1))
+            matched_keywords_found = set()
+
+            # 先收集所有匹配到的关键词
+            for keyword, related_systems in system_keywords.items():
+                if keyword and keyword in document_text:
+                    matched_keywords_found.add(keyword)
+                    for sys_data in related_systems:
+                        sys_key = sys_data.get("system_name_en", "") or sys_data.get("system_name_cn", "")
+                        if sys_key and sys_key not in matched_systems_set:
+                            matched_systems_set[sys_key] = sys_data
+
+            matched_systems = list(matched_systems_set.values())
+
+            result = {
+                "success": True,
+                "call_id": call_id,
+                "timestamp": datetime.now().isoformat(),
+                "matched_systems": matched_systems,
+                "matched_count": len(matched_systems),
+                "matched_keywords": list(matched_keywords_found),
+                "total_systems_in_table": len(systems),
+                "note": "提供了初步的文本关键词匹配结果，建议结合LLM进行语义级别的系统识别以提高准确率"
+            }
+
+            logger.info(f"[{call_id}] 匹配完成: 找到{len(matched_systems)}个关联系统, {len(matched_keywords_found)}个匹配关键词")
+            return json.dumps(result, ensure_ascii=False, indent=2)
+
+        except Exception as e:
+            logger.exception(f"[{call_id}] 匹配系统信息异常")
+            return json.dumps({
+                "success": False,
+                "error": f"匹配失败: {str(e)}",
+                "error_type": type(e).__name__,
+                "call_id": call_id,
+                "timestamp": datetime.now().isoformat()
+            }, ensure_ascii=False)
+
+    # ============================================================
     # 第6步 - 文档修订工具
     # ============================================================
 
@@ -1106,8 +1604,8 @@ if FASTMCP_AVAILABLE:
         """获取所有工具信息"""
         tools_info = {
             "name": "UnifiedDocumentServer",
-            "version": "1.1.0",
-            "description": "统一文档MCP服务器，支持文档读取和修订（含Word原生修订模式Track Changes）",
+            "version": "1.2.0",
+            "description": "统一文档MCP服务器，支持文档读取、系统信息获取和文档修订（含Word原生修订模式Track Changes）",
             "tools": [
                 {
                     "name": "read_document",
@@ -1118,6 +1616,16 @@ if FASTMCP_AVAILABLE:
                     "name": "get_document_info",
                     "description": "获取文档基本信息（第1步辅助）",
                     "category": "文档读取"
+                },
+                {
+                    "name": "read_system_info",
+                    "description": "从Excel系统信息表读取系统基础信息（第1.5步 - 新增）",
+                    "category": "系统信息"
+                },
+                {
+                    "name": "match_system_from_document",
+                    "description": "从文档文本中匹配关联的系统信息（第1.5步 - 辅助）",
+                    "category": "系统信息"
                 },
                 {
                     "name": "revise_document",
@@ -1144,26 +1652,26 @@ def main():
     parser.add_argument(
         '--transport',
         choices=['stdio', 'sse'],
-        default='stdio',
-        help='传输方式: stdio (默认) 或 sse'
+        default='sse',
+        help='传输方式: stdio 或 sse (默认)'
     )
     parser.add_argument(
         '--host',
-        default='0.0.0.0',
-        help='SSE模式下的主机地址 (默认: 0.0.0.0)'
+        default='40.129.21.85',
+        help='SSE模式下的主机地址 (默认: 40.129.21.85)'
     )
     parser.add_argument(
         '--port',
         type=int,
-        default=8000,
-        help='SSE模式下的端口号 (默认: 8000)'
+        default=18080,
+        help='SSE模式下的端口号 (默认: 18080)'
     )
 
     args = parser.parse_args()
 
     print("=" * 70)
-    print("统一文档MCP服务器（第1步 + 第6步）v1.1.0")
-    print("新增功能：支持Word原生修订模式（Track Changes）")
+    print("统一文档MCP服务器（第1步 + 第1.5步 + 第6步）v1.2.0")
+    print("新增功能：系统信息读取 + 文档系统匹配")
     print("联动服务：时间轴图MCP服务器（timeline_mcp_server.py）")
     print("=" * 70)
 
@@ -1177,6 +1685,10 @@ def main():
         print("请运行: pip install python-docx")
         sys.exit(1)
 
+    if not OPENPYXL_AVAILABLE:
+        print("\n警告: openpyxl未安装，系统信息读取功能不可用")
+        print("如需使用系统信息读取功能，请运行: pip install openpyxl")
+
     print(f"\n传输方式: {args.transport.upper()}")
 
     if args.transport == 'sse':
@@ -1186,12 +1698,15 @@ def main():
 
     print("\n可用工具:")
     print("  【第1步 - 文档读取】")
-    print("    1. read_document      - 读取文档内容")
-    print("    2. get_document_info  - 获取文档基本信息")
+    print("    1. read_document          - 读取文档内容")
+    print("    2. get_document_info      - 获取文档基本信息")
+    print("  【第1.5步 - 系统信息获取（新增）】")
+    print("    3. read_system_info       - 从Excel系统信息表读取系统基础信息")
+    print("    4. match_system_from_document - 从文档文本中匹配关联的系统信息")
     print("  【第6步 - 文档修订】")
-    print("    3. revise_document    - 根据建议修订文档")
-    print("    4. validate_suggestions - 验证建议JSON")
-    print("    5. get_tools_info     - 工具信息")
+    print("    5. revise_document        - 根据建议修订文档")
+    print("    6. validate_suggestions   - 验证建议JSON")
+    print("    7. get_tools_info         - 工具信息")
     print("\n启动服务...")
     print("-" * 70)
 
@@ -1221,15 +1736,15 @@ def _start_timeline_server(transport: str):
     try:
         import subprocess
         if transport == 'sse':
-            cmd = [sys.executable, str(timeline_file), '--transport', 'sse', '--port', '8002']
+            cmd = [sys.executable, str(timeline_file), '--transport', 'sse', '--host', '40.129.21.85', '--port', '8002']
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
             )
-            logger.info(f"时间轴MCP服务已启动: http://0.0.0.0:8002 (PID: {process.pid})")
-            print(f"\n  【时间轴图服务 - 端口8002】")
+            logger.info(f"时间轴MCP服务已启动: http://40.129.21.85:8002 (PID: {process.pid})")
+            print(f"\n  【时间轴图服务 - http://40.129.21.85:8002】")
             print(f"    6. generate_timeline       - 根据事件数据生成时间轴PNG图")
             print(f"    7. validate_timeline_data  - 验证时间轴数据格式")
             print(f"    8. get_timeline_template   - 获取时间轴数据模板")

@@ -253,9 +253,9 @@
 请以以下JSON格式输出处理结果（必须是合法JSON格式）：
 
 ```json
-{
+{{
   "suggestions": [
-    {
+    {{
       "id": "sugg_001",
       "rule_id": "NAMING_SYSTEM_001",
       "rule_name": "系统名称首次出现格式不规范",
@@ -268,8 +268,8 @@
       "source": "hard",
       "group": null,
       "order": 1
-    },
-    {
+    }},
+    {{
       "id": "sugg_002",
       "rule_id": "CONTENT_DEPTH_001",
       "rule_name": "根因分析深度不足",
@@ -282,8 +282,8 @@
       "source": "soft",
       "group": null,
       "order": 2
-    },
-    {
+    }},
+    {{
       "id": "sugg_003",
       "rule_id": "PUNCT_TIME_001,FORMAT_NUMBERING_001",
       "rule_name": "时间格式不规范且编号样式错误",
@@ -296,40 +296,40 @@
       "source": "merged",
       "group": "time_and_numbering",
       "order": 3
-    }
+    }}
   ],
-  "statistics": {
+  "statistics": {{
     "total": 3,
-    "by_severity": {
+    "by_severity": {{
       "Critical": 1,
       "High": 2,
       "Medium": 0,
       "Low": 0
-    },
-    "by_type": {
+    }},
+    "by_type": {{
       "naming": 1,
       "content": 1,
       "punctuation": 1,
       "format": 0,
       "logic": 0,
       "language": 0
-    },
-    "by_source": {
+    }},
+    "by_source": {{
       "hard": 1,
       "soft": 1,
       "merged": 1
-    },
+    }},
     "duplicates_removed": 2,
     "enhanced": 3,
     "severity_changed": 0
-  },
+  }},
   "processing_notes": [
     "已合并2条关于系统名称的建议（硬性+软性）",
     "已删除1条重复的编号错误建议（被更全面的建议覆盖）",
     "已合并时间格式和编号样式为综合性建议",
     "Critical级别建议需优先处理"
   ]
-}
+}}
 ```
 
 ## 字段说明
@@ -457,7 +457,7 @@
 **第2步硬性规则结果：**
 ```json
 [
-  {
+  {{
     "id": "hard_001",
     "rule_id": "NAMING_TEAM_001",
     "rule_name": "项目组名称不规范",
@@ -467,8 +467,8 @@
     "original_text": "项目组立即启动应急预案",
     "suggestion": "改为'研发中心核心系统项目组立即启动应急预案'",
     "reason": "硬性规则要求：不能直接写'项目组'"
-  },
-  {
+  }},
+  {{
     "id": "hard_002",
     "rule_id": "PUNCT_TIME_001",
     "rule_name": "时间格式不规范",
@@ -478,14 +478,14 @@
     "original_text": "14：30",
     "suggestion": "改为'14:30'（英文冒号）",
     "reason": "硬性规则要求：时间格式必须为09:00-23:16"
-  }
+  }}
 ]
 ```
 
 **第3步软性规则结果：**
 ```json
 [
-  {
+  {{
     "id": "soft_001",
     "rule_id": "LANGUAGE_STYLE_001",
     "rule_name": "语言风格口语化",
@@ -495,8 +495,8 @@
     "original_text": "项目组立即启动应急预案",
     "suggestion": "改为'研发中心核心系统项目组立即启动应急预案'",
     "reason": "'项目组'表述不完整，应明确部门和系统"
-  },
-  {
+  }},
+  {{
     "id": "soft_002",
     "rule_id": "CONTENT_DEPTH_001",
     "rule_name": "根因分析深度不足",
@@ -506,16 +506,16 @@
     "original_text": "数据库连接池耗尽",
     "suggestion": "建议进行5Why分析深入挖掘根本原因",
     "reason": "当前分析停留在表面现象"
-  }
+  }}
 ]
 ```
 
 ### 示例输出
 
 ```json
-{
+{{
   "suggestions": [
-    {
+    {{
       "id": "sugg_001",
       "rule_id": "NAMING_TEAM_001",
       "rule_name": "项目组名称不规范",
@@ -528,8 +528,8 @@
       "source": "hard",
       "group": null,
       "order": 1
-    },
-    {
+    }},
+    {{
       "id": "sugg_002",
       "rule_id": "CONTENT_DEPTH_001",
       "rule_name": "根因分析深度不足",
@@ -542,8 +542,8 @@
       "source": "soft",
       "group": null,
       "order": 2
-    },
-    {
+    }},
+    {{
       "id": "sugg_003",
       "rule_id": "PUNCT_TIME_001",
       "rule_name": "时间格式不规范",
@@ -556,40 +556,40 @@
       "source": "hard",
       "group": null,
       "order": 3
-    }
+    }}
   ],
-  "statistics": {
+  "statistics": {{
     "total": 3,
-    "by_severity": {
+    "by_severity": {{
       "Critical": 1,
       "High": 2,
       "Medium": 0,
       "Low": 0
-    },
-    "by_type": {
+    }},
+    "by_type": {{
       "naming": 1,
       "content": 1,
       "punctuation": 1,
       "format": 0,
       "logic": 0,
       "language": 0
-    },
-    "by_source": {
+    }},
+    "by_source": {{
       "hard": 2,
       "soft": 1,
       "merged": 0
-    },
+    }},
     "duplicates_removed": 1,
     "enhanced": 3,
     "severity_changed": 0
-  },
+  }},
   "processing_notes": [
     "已合并1条重复建议：软性规则的'语言风格口语化'与硬性规则的'项目组名称不规范'指向同一问题，已合并",
     "已完善3条建议：补充了修改示例和验证方法",
     "按severity排序：Critical > High",
     "Critical级别建议（项目组名称）需优先处理"
   ]
-}
+}}
 ```
 
 ---

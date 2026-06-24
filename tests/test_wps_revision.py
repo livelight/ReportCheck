@@ -5,9 +5,14 @@
 
 import json
 import os
+import sys
 import zipfile
 from xml.etree import ElementTree as ET
 from docx import Document
+
+# 添加项目根目录到模块搜索路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from revision_mcp_node import (
     FASTMCP_AVAILABLE,
     DOCX_AVAILABLE,

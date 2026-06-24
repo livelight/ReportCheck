@@ -6,6 +6,9 @@
 import sys
 import os
 
+# 添加项目根目录到模块搜索路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 def run_test(name, func):
     """运行单个测试"""
     print(f"\n{'='*60}")
@@ -95,12 +98,16 @@ def test_sse_server_import():
 
 def test_files_exist():
     """测试关键文件存在"""
+    # 项目根目录 = tests/../
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     required_files = [
         'revision_mcp_node.py',
         'mcp_sse_server.py',
         'mcp_server.py',
         'requirements.txt',
         'README.md',
+    ]
+    prompt_files = [
         'prompt_step2_hard_rules.md',
         'prompt_step3_soft_rules_v2.md',
         'prompt_step4_merge_prioritize.md',
@@ -108,7 +115,9 @@ def test_files_exist():
     ]
     
     for f in required_files:
-        assert os.path.exists(f), f"缺少文件: {f}"
+        assert os.path.exists(os.path.join(root, f)), f"缺少文件: {f}"
+    for f in prompt_files:
+        assert os.path.exists(os.path.join(root, 'docs', f)), f"缺少文件: docs/{f}"
 
 def main():
     print("="*60)

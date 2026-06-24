@@ -6,132 +6,54 @@ import json
 import os
 import sys
 import tempfile
-from pathlib import Path
+from docx import Document
 
-# 添加当前目录到路径
-sys.path.insert(0, str(Path(__file__).parent))
+# 添加项目根目录到模块搜索路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from revision_mcp_node import RevisionMCPNode, CheckSuggestion
-
-
-def create_sample_docx(output_path: str):
-    """创建一个示例Word文档用于测试"""
-    from docx import Document
-    from docx.shared import Pt, RGBColor
-
-    doc = Document()
-
-    # 标题
-    title = doc.add_heading('项目进度报告', level=1)
-
-    # 章节1
-    doc.add_heading('一、项目概述', level=2)
-    doc.add_paragraph('本项目旨在开发一套企业级文档管理系统。')
-
-    # 章节2
-    doc.add_heading('二、当前进展', level=2)
-    doc.add_paragraph('目前已完成核心功能的开发和测试工作。')
-
-    # 章节3
-    doc.add_heading('三、风险分析', level=2)
-    doc.add_paragraph('项目进展顺利，暂无风险。')
-
-    # 章节4
-    doc.add_heading('四、下一步计划', level=2)
-    doc.add_paragraph('继续优化系统性能，并进行用户验收测试。')
-
-    # 章节5
-    doc.add_heading('五、总结', level=2)
-    doc.add_paragraph('整体项目进度符合预期。')
-
-    doc.save(output_path)
-    print(f"创建测试文档: {output_path}")
-    return output_path
-
-
-def create_sample_suggestions() -> str:
-    """创建示例检查建议JSON"""
-    suggestions = [
-        {
-            "id": "ref_001",
-            "rule_id": "FORMAT_001",
-            "rule_name": "标题格式不规范",
-            "type": "format",
-            "severity": "High",
-            "section": "sec_001",
-            "original_text": "一、项目概述",
-            "suggestion": "一、项目概述",
-            "reason": "标题应简洁，不包含多余标点"
-        },
-        {
-            "id": "ref_002",
-            "rule_id": "CONTENT_023",
-            "rule_name": "缺少风险分析",
-            "type": "content",
-            "severity": "High",
-            "section": "sec_003",
-            "original_text": "项目进展顺利，暂无风险。",
-            "suggestion": "项目整体进展顺利，目前主要风险包括：1）人员流动性风险；2）技术架构调整风险。建议加强团队稳定性和代码文档建设。",
-            "reason": "风险分析过于简单，应包含具体风险点和应对措施"
-        },
-        {
-            "id": "ref_003",
-            "rule_id": "LANG_001",
-            "rule_name": "语法错误",
-            "type": "language",
-            "severity": "Medium",
-            "section": "sec_002",
-            "original_text": "目前已完成核心功能的开发和测试工作。",
-            "suggestion": "目前已完成核心功能的开发和测试工作，整体质量符合预期。",
-            "reason": "语句缺少主谓完整性的描述"
-        },
-        {
-            "id": "ref_004",
-            "rule_id": "LOGIC_005",
-            "rule_name": "逻辑顺序问题",
-            "type": "logic",
-            "severity": "Low",
-            "section": "sec_004",
-            "original_text": "继续优化系统性能，并进行用户验收测试。",
-            "suggestion": "1. 首先进行用户验收测试；2. 根据测试反馈优化系统性能；3. 部署上线。",
-            "reason": "建议先测试后优化，逻辑更合理"
-        }
-    ]
-    return json.dumps(suggestions, ensure_ascii=False, indent=2)
+from revision_mcp_node import (
+    RevisionMCPNode,
+    CheckSuggestion as OldCheckSuggestion,
+    DocumentParser,
+    TrackChangesReviser,
+    FASTMCP_AVAILABLE,
+    DOCX_AVAILABLE
+)
 
 
 def test_revision_mcp_node():
-    """测试文档修订MCP节点"""
-    print("=" * 60)
-    print("文档修订MCP节点测试")
-    print("=" * 60)
+    """测试RevisionMCPNode - 使用revise_document接口"""
+    import json as json_mod
+    from docx import Document as DocxDocument
+    
+    # 创建测试文档
+    doc = DocxDocument()
+    doc.add_heading('测试文档', level=1)
+    doc.add_paragraph('这是需要修改的原文内容。')
+    doc.add_paragraph('项目进展顺利，暂无风险。')
+    test_path = 'test_revision_temp.docx'
+    doc.save(test_path)
 
-    # 创建MCP节点实例
+    # 直接使用RevisionMCPNode的revise_document方法
     node = RevisionMCPNode()
-
-    # 打印工具定义
-    print("\n[工具定义]")
-    print(json.dumps(node.get_tool_definition(), indent=2, ensure_ascii=False))
-
-    # 创建临时测试文档
-    temp_dir = tempfile.mkdtemp()
-    doc_path = os.path.join(temp_dir, "test_document.docx")
-    create_sample_docx(doc_path)
-
-    # 获取示例建议
-    suggestions_json = create_sample_suggestions()
-
-    print("\n[测试输入]")
-    print(f"文档路径: {doc_path}")
-    print(f"文档存在: {os.path.exists(doc_path)}")
-    print(f"建议数量: 4条")
-
-    # 执行修订
-    print("\n[执行修订...]")
+    suggestions = [
+        {
+            'id': 'test_001',
+            'rule_id': 'CONTENT_001',
+            'rule_name': '测试修订',
+            'type': 'content',
+            'severity': 'High',
+            'section': 'sec_001',
+            'original_text': '这是需要修改的原文内容。',
+            'suggestion': '这是修改后的新内容。',
+            'reason': '测试原因'
+        }
+    ]
     result = node.revise_document(
-        file_path=doc_path,
-        suggestions_json=suggestions_json,
-        preserve_original=True
+        file_path=test_path,
+        suggestions_json=json_mod.dumps(suggestions, ensure_ascii=False),
+        output_path='test_revision_output.docx',
+        use_track_changes="false"
     )
 
     # 输出结果
@@ -206,7 +128,7 @@ def test_suggestion_model():
         "reason": "风险分析过于简单"
     }
 
-    suggestion = CheckSuggestion.from_dict(test_data)
+    suggestion = OldCheckSuggestion.from_dict(test_data)
 
     print(f"  ID: {suggestion.id}")
     print(f"  规则名称: {suggestion.rule_name}")

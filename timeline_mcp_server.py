@@ -418,7 +418,7 @@ class TimelineChartGenerator:
 
             # ==================== 多行时间轴布局 ====================
             
-            MAX_PER_ROW = 10  # 每行最多10个时间点
+            MAX_PER_ROW = 7  # 每行最多7个时间点
             margin_left = 0.03
             margin_right = 0.03
             
@@ -528,22 +528,6 @@ class TimelineChartGenerator:
                         node_color = handler_color_map[primary_handler]
 
                 # 所有行的内容块都显示在上方
-                is_top = True
-                
-                # 连接线 - 从时间轴主节点到描述内容块，带箭头
-                conn_len = 0.05  # 连接线长度，确保箭头可见
-                if is_top:
-                    # 上方：从主节点向上，用带箭头的虚线连接到描述文本
-                    ax.annotate('', xy=(x_pos, timeline_y + conn_len),
-                               xytext=(x_pos, timeline_y + 0.01),
-                               arrowprops=dict(arrowstyle='->', color='#78909C', 
-                                               linestyle='--', lw=1.5, alpha=0.5))
-                else:
-                    # 下方：从主节点向下，用带箭头的虚线连接到描述文本
-                    ax.annotate('', xy=(x_pos, timeline_y - conn_len),
-                               xytext=(x_pos, timeline_y - 0.01),
-                               arrowprops=dict(arrowstyle='->', color='#78909C',
-                                               linestyle='--', lw=1.5, alpha=0.5))
                 
                 # 事件点
                 ax.plot(x_pos, timeline_y, marker=style['marker'],
@@ -556,79 +540,136 @@ class TimelineChartGenerator:
                            color=node_color, alpha=0.12, zorder=style['zorder'] - 1)
                 
                 # 时间标签
-                time_label_y = timeline_y + 0.055 if is_top else timeline_y - 0.055
+                time_label_y = timeline_y + 0.055
                 ax.text(x_pos, time_label_y, time_str,
                        fontsize=11, fontweight='bold',
                        ha='center', va='center',
                        color='#37474F')
                 
-                # 构建描述文本
+                # ==================== 分支节点布局 ====================
+                # 同一时间点多条内容时，各条独立分支显示
+                # 单条内容居中显示，多条内容在两侧扇形排布
+                
+                MAX_CHARS_PER_LINE = 12
                 desc_lines = descriptions[:]
-                info_parts = []
+                
+                # handler和system信息
                 system_str = ' | '.join(list(set(systems))) if systems else ''
                 handler_str = '  '.join([f'[{h}]' for h in handlers]) if handlers else ''
                 
-                display_lines = []
+                # 为每条描述构建独立的显示文本
+                desc_items = []
                 for dl in desc_lines:
-                    display_lines.append(dl)
-                if handler_str or system_str:
-                    desc_info = []
-                    if handler_str:
-                        desc_info.append(handler_str)
-                    if system_str:
-                        desc_info.append(system_str)
-                    display_lines.append('')
-                    display_lines.append('  '.join(desc_info))
+                    # 自动换行
+                    wrapped_lines = []
+                    remaining = dl
+                    while len(remaining) > MAX_CHARS_PER_LINE:
+                        wrapped_lines.append(remaining[:MAX_CHARS_PER_LINE])
+                        remaining = remaining[MAX_CHARS_PER_LINE:]
+                    if remaining:
+                        wrapped_lines.append(remaining)
+                    desc_items.append({
+                        'text_lines': wrapped_lines,
+                        'total_lines': len(wrapped_lines)
+                    })
                 
-                display_text = '\n'.join(display_lines)
-                n_desc = len(descriptions)
-                n_total_lines = len(display_lines)  # 总行数（含分隔和信息行）
+                n_desc = len(desc_items)
+                # handler/system信息行
+                info_line = ''
+                info_parts = []
+                if handler_str:
+                    info_parts.append(handler_str)
+                if system_str:
+                    info_parts.append(system_str)
+                has_info = len(info_parts) > 0
                 
-                # 自适应偏移量：根据总行数计算
-                base_offset = 0.08
-                text_offset = base_offset + max(0, n_total_lines - 1) * 0.032
-                
-                if is_top:
+                if n_desc == 1:
+                    # 单条：居中显示（原有逻辑）
+                    display_lines = desc_items[0]['text_lines']
+                    if has_info:
+                        display_lines.append('')
+                        display_lines.append('  '.join(info_parts))
+                    display_text = '\n'.join(display_lines)
+                    n_total_lines = len(display_lines)
+                    
+                    base_offset = 0.08
+                    text_offset = base_offset + max(0, n_total_lines - 1) * 0.032
                     label_y = timeline_y + text_offset
-                    label_va = 'bottom'
-                else:
-                    label_y = timeline_y - text_offset
-                    label_va = 'top'
-                
-                # 处理文字重叠：检测冲突，如有冲突则微调
-                text_height = n_desc * 0.045 + 0.03
-                if has_overlap(x_pos, label_y, text_height, drawn_texts):
-                    # 偏移位置
-                    if is_top:
-                        label_y += 0.03
+                    
+                    text_height = n_total_lines * 0.032 + 0.03
+                    
+                    # 特殊节点背景框
+                    if node_type == 'special':
+                        bbox_props = dict(boxstyle='round,pad=0.5', facecolor='#FFF8E1', edgecolor='#F57C00', linewidth=1.5)
+                        ax.text(x_pos, label_y, display_text, fontsize=9, ha='center', va='bottom', color='#212121', bbox=bbox_props)
                     else:
-                        label_y -= 0.03
-                
-                drawn_texts.append((x_pos, label_y, text_height))
-                
-                # 特殊节点加背景框
-                if node_type == 'special':
-                    bbox_props = dict(
-                        boxstyle='round,pad=0.5',
-                        facecolor='#FFF8E1',
-                        edgecolor='#F57C00',
-                        linewidth=1.5
-                    )
-                    ax.text(x_pos, label_y, display_text,
-                           fontsize=9, ha='center', va=label_va,
-                           color='#212121', bbox=bbox_props)
+                        bbox_props = dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='#E0E0E0', linewidth=0.5, alpha=0.8)
+                        ax.text(x_pos, label_y, display_text, fontsize=9, ha='center', va='bottom', color='#424242', bbox=bbox_props)
+                    
+                    # 箭头连接线
+                    ax.annotate('', xy=(x_pos, timeline_y + 0.05), xytext=(x_pos, timeline_y + 0.01),
+                               arrowprops=dict(arrowstyle='->', color='#78909C', linestyle='--', lw=1.5, alpha=0.5))
+                    
                 else:
-                    # 普通节点添加浅色半透明背景
-                    bbox_props = dict(
-                        boxstyle='round,pad=0.3',
-                        facecolor='white',
-                        edgecolor='#E0E0E0',
-                        linewidth=0.5,
-                        alpha=0.8
-                    )
-                    ax.text(x_pos, label_y, display_text,
-                           fontsize=9, ha='center', va=label_va,
-                           color='#424242', bbox=bbox_props)
+                    # 多条：纵向顺序排列（所有分支垂直堆叠在时间点上方）
+                    branch_base_y_offset = 0.08
+                    branch_y_step = 0.12
+                    
+                    # 计算所有分支的总高度，用于判断是否需要增大行间距
+                    all_item_lines = sum(item['total_lines'] for item in desc_items) + n_desc
+                    branch_height = branch_base_y_offset + n_desc * branch_y_step + all_item_lines * 0.032
+                    
+                    for di, item in enumerate(desc_items):
+                        # 所有分支垂直居中堆叠在时间点正上方（不左右偏移）
+                        bx = x_pos
+                        
+                        # Y位置：递增高度
+                        item_lines = item['text_lines']
+                        n_item_lines = item['total_lines']
+                        
+                        # 组装显示文本
+                        d_lines = list(item_lines)
+                        # 为该分支添加handler信息
+                        # 如果所有描述共享同一个handler，每一条都显示
+                        branch_info = []
+                        if handlers:
+                            h_idx = di % len(handlers)
+                            branch_info.append(f'[{handlers[h_idx]}]')
+                        if systems:
+                            s_idx = di % len(systems)
+                            branch_info.append(f'|{systems[s_idx]}|')
+                        if branch_info:
+                            d_lines.append(' '.join(branch_info))
+                        
+                        item_text = '\n'.join(d_lines)
+                        item_total_lines = len(d_lines)
+                        
+                        # 从上到下排列分支
+                        by = timeline_y + branch_base_y_offset + di * branch_y_step
+                        # 更靠边的分支略低一点
+                        if di > 1:
+                            by += (di - 1) * 0.01
+                        
+                        # 分支连接线（从主节点到卡片）
+                        ax.plot([x_pos, bx], [timeline_y + 0.01, by - 0.005],
+                               color='#90A4AE', linewidth=1.0, linestyle='--', alpha=0.4, zorder=1)
+                        
+                        # 分支内容卡片（紧凑小框）
+                        card_bbox = dict(
+                            boxstyle='round,pad=0.2',
+                            facecolor='white', edgecolor='#B0BEC5',
+                            linewidth=0.5, alpha=0.85
+                        )
+                        if node_type == 'special' and di == 0:
+                            card_bbox = dict(
+                                boxstyle='round,pad=0.25',
+                                facecolor='#FFF8E1', edgecolor='#F57C00',
+                                linewidth=1.0
+                            )
+                        
+                        ax.text(bx, by, item_text,
+                               fontsize=7.5, ha='center', va='bottom',
+                               color='#424242', bbox=card_bbox)
                 
                 # 开始/结束标记
                 if node_type == 'start':
@@ -1121,13 +1162,13 @@ def main():
     parser.add_argument(
         '--transport',
         choices=['stdio', 'sse'],
-        default='stdio',
-        help='传输方式: stdio (默认) 或 sse'
+        default='sse',
+        help='传输方式: stdio 或 sse (默认)'
     )
     parser.add_argument(
         '--host',
-        default='0.0.0.0',
-        help='SSE模式下的主机地址 (默认: 0.0.0.0)'
+        default='40.129.21.85',
+        help='SSE模式下的主机地址 (默认: 40.129.21.85)'
     )
     parser.add_argument(
         '--port',

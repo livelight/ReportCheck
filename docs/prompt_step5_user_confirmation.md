@@ -159,7 +159,7 @@
 
 ```json
 [
-  {
+  {{
     "id": "sugg_001",
     "rule_id": "NAMING_TEAM_001",
     "rule_name": "项目组名称不规范",
@@ -171,8 +171,8 @@
     "reason": "硬性规则要求：不能直接写'项目组'",
     "status": "accepted",
     "user_note": "已确认，需要修改"
-  },
-  {
+  }},
+  {{
     "id": "sugg_002",
     "rule_id": "CONTENT_DEPTH_001",
     "rule_name": "根因分析深度不足",
@@ -184,8 +184,8 @@
     "reason": "当前分析停留在表面现象",
     "status": "accepted",
     "user_note": ""
-  },
-  {
+  }},
+  {{
     "id": "sugg_003",
     "rule_id": "LANGUAGE_STYLE_001",
     "rule_name": "语言风格口语化",
@@ -197,7 +197,7 @@
     "reason": "'以后'过于口语化",
     "status": "rejected",
     "user_note": "当前版本暂不修改，下期优化"
-  }
+  }}
 ]
 ```
 
@@ -220,26 +220,26 @@
 请在输出后附加统计信息：
 
 ```json
-{
-  "statistics": {
+{{
+  "statistics": {{
     "total": 10,
     "accepted": 7,
     "rejected": 3,
-    "by_severity": {
-      "Critical": {"total": 2, "accepted": 2, "rejected": 0},
-      "High": {"total": 3, "accepted": 3, "rejected": 0},
-      "Medium": {"total": 3, "accepted": 2, "rejected": 1},
-      "Low": {"total": 2, "accepted": 0, "rejected": 2}
-    },
-    "by_type": {
-      "naming": {"total": 2, "accepted": 2},
-      "format": {"total": 2, "accepted": 2},
-      "content": {"total": 3, "accepted": 2},
-      "logic": {"total": 2, "accepted": 1},
-      "language": {"total": 1, "accepted": 0}
-    }
-  }
-}
+    "by_severity": {{
+      "Critical": {{"total": 2, "accepted": 2, "rejected": 0}},
+      "High": {{"total": 3, "accepted": 3, "rejected": 0}},
+      "Medium": {{"total": 3, "accepted": 2, "rejected": 1}},
+      "Low": {{"total": 2, "accepted": 0, "rejected": 2}}
+    }},
+    "by_type": {{
+      "naming": {{"total": 2, "accepted": 2}},
+      "format": {{"total": 2, "accepted": 2}},
+      "content": {{"total": 3, "accepted": 2}},
+      "logic": {{"total": 2, "accepted": 1}},
+      "language": {{"total": 1, "accepted": 0}}
+    }}
+  }}
+}}
 ```
 
 ## 注意事项
@@ -271,9 +271,9 @@
 ## 示例输出
 
 ```json
-{
+{{
   "suggestions": [
-    {
+    {{
       "id": "sugg_001",
       "rule_id": "NAMING_TEAM_001",
       "rule_name": "项目组名称不规范",
@@ -285,8 +285,8 @@
       "reason": "硬性规则要求：不能直接写'项目组'",
       "status": "accepted",
       "user_note": "已确认修改"
-    },
-    {
+    }},
+    {{
       "id": "sugg_002",
       "rule_id": "CONTENT_DEPTH_001",
       "rule_name": "根因分析深度不足",
@@ -298,18 +298,18 @@
       "reason": "当前分析停留在表面现象",
       "status": "accepted",
       "user_note": ""
-    }
+    }}
   ],
-  "statistics": {
+  "statistics": {{
     "total": 2,
     "accepted": 2,
     "rejected": 0,
-    "by_severity": {
-      "Critical": {"total": 1, "accepted": 1, "rejected": 0},
-      "High": {"total": 1, "accepted": 1, "rejected": 0}
-    }
-  }
-}
+    "by_severity": {{
+      "Critical": {{"total": 1, "accepted": 1, "rejected": 0}},
+      "High": {{"total": 1, "accepted": 1, "rejected": 0}}
+    }}
+  }}
+}}
 ```
 
 ## 与第6步的衔接
